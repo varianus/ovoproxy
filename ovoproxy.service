@@ -1,0 +1,16 @@
+[Unit]
+Description=ovoproxy - simplest proxy
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ovoproxy
+ExecReload=/bin/kill -HUP $MAINPID
+StandardOutput=journal+console
+StandardError=inherit
+SyslogIdentifier=ovoproxy
+RemainAfterExit=yes
+TimeoutSec=25
+
+[Install]
+WantedBy=multi-user.target
