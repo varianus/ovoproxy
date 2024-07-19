@@ -13,8 +13,10 @@ uses {$IFDEF UNIX}
   IdHTTPProxyServer,
   inifiles,
   EventLog,
+  base64,
   indylaz,
   SysUtils,
+  types,
   interfaces;
 
 type
@@ -34,8 +36,10 @@ type
     sa, osa: sigactionrec;
     Ini: TIniFile;
     IPRules: array of ComputedNet;
-    HaveDenyRules, HaveAllowRules: boolean;
+    Users: TStringDynArray;
+    HaveDenyRules, HaveAllowRules, HaveAuthentication: boolean;
     procedure OnConnect(AContext: TIdContext);
+    procedure OnHTTPBeforeCommand(AContext: TIdHTTPProxyServerContext);
     procedure RegisterSignalHandler;
   public
     constructor Create;
@@ -58,7 +62,7 @@ var
     Err: boolean;
   begin
     Result.dwMaskedNet := 0;
-    Result.dwMask      := $ffffffff;
+    Result.dwMask := $ffffffff;
 
     if Pos('/', AIPRange) = 0 then
       sTmpRange := AIPRange + '/32'
@@ -69,7 +73,7 @@ var
     if (not err) and (dwnet <> 0) then
     begin
       // get the mask from the range
-      sTmp   := Copy(sTmpRange, Pos('/', sTmpRange) + 1, 2);
+      sTmp := Copy(sTmpRange, Pos('/', sTmpRange) + 1, 2);
       dwMask := DWORD(StrToIntDef(sTmp, 32));
       dwMask := not ((1 shl (32 - dwMask)) - 1);
       Result.dwMaskedNet := (dwNet and dwMask);
@@ -80,10 +84,12 @@ var
   procedure handleSigTerm(signum: cInt; siginfo: psiginfo; sigcontext: psigcontext); cdecl;
   begin
     case signum of
-      SIGTERM: begin
+      SIGTERM:
+      begin
         Proxy.Stop;
       end;
-      SIGHUP: begin
+      SIGHUP:
+      begin
         Proxy.Reload;
       end
       else
@@ -124,11 +130,12 @@ var
     ThreadPool := TIdSchedulerOfThreadPool.Create(nil);
     ThreadPool.PoolSize := 10;
     ThreadPool.MaxThreads := 0;
-    FProxy     := TIdHTTPProxyServer.Create(nil);
+    FProxy := TIdHTTPProxyServer.Create(nil);
     FProxy.DefaultPort := 8118;
     FProxy.DefaultTransferMode := tmStreaming;
     FProxy.Scheduler := ThreadPool;
     fproxy.OnConnect := @OnConnect;
+    FProxy.OnHTTPBeforeCommand := @OnHTTPBeforeCommand;
 
   end;
 
@@ -143,6 +150,42 @@ var
     inherited Destroy;
   end;
 
+  procedure TOvoProxy.OnHTTPBeforeCommand(
+    AContext: TIdHTTPProxyServerContext);
+  var
+    ValidUser: boolean;
+    Header: string;
+    i: SizeInt;
+  begin
+    if HaveAuthentication then
+    begin
+      ValidUser := False;
+      if AContext.Headers.IndexOfName('Proxy-Authorization') > 0 then
+      begin
+        Header := AContext.Headers.Values['Proxy-Authorization'];
+        if Header.StartsWith('Basic') then
+        begin
+          Header := Header.Substring(6);
+          for i := 0 to Length(Users) - 1 do
+            if Users[i] = Header then
+            begin
+              ValidUser := True;
+              Break;
+            end;
+        end;
+      end;
+      if not ValidUser then
+      begin
+        AContext.Connection.IOHandler.WriteLn('HTTP/1.1 407 Proxy Authentication Required'); {do not localize}
+        AContext.Connection.IOHandler.WriteLn('Proxy-Authenticate: Basic realm="ovoproxy"'); {do not localize}
+        AContext.Connection.IOHandler.WriteLn;
+        abort;
+      end;
+
+    end;
+
+  end;
+
   procedure TOvoProxy.OnConnect(AContext: TIdContext);
   var
     dwIP: uint32;
@@ -152,7 +195,7 @@ var
   begin
     if not (HaveAllowRules or HaveDenyRules) then
       Exit;
-    dwIP    := IPv4ToUInt32(AContext.Connection.Socket.Binding.PeerIP, Err);
+    dwIP := IPv4ToUInt32(AContext.Connection.Socket.Binding.PeerIP, Err);
     Allowed := (not err) and (dwip <> 0);
     if Allowed and HaveAllowRules then
     begin
@@ -215,13 +258,20 @@ var
   var
     Values: TStringList;
     i: integer;
-    offset: integer;
+    offset, j: integer;
     str, FConfigFile: string;
   begin
 
-    FConfigFile := GetAppConfigFile(False, True);
+    FConfigFile := '';
+    if ParamCount > 0 then
+      FConfigFile := ParamStr(1);
 
-    FConfigFile := ChangeFileExt(FConfigFile, '.conf');
+    if not FileExists(FConfigFile) then
+    begin
+      FConfigFile := GetAppConfigFile(False, True);
+      FConfigFile := ChangeFileExt(FConfigFile, '.conf');
+    end;
+
     if not FileExists(FConfigFile) then
     begin
       FConfigFile := '/etc/ovoproxy.conf';
@@ -234,26 +284,27 @@ var
     else
     if str = 'logfile' then
     begin
-      log.LogType  := ltFile;
+      log.LogType := ltFile;
       log.FileName := Ini.ReadString('Config', 'LogFile', '/var/log/ovoproxy.log');
       ForceDirectories(ExtractFileDir(log.filename));
     end
     else
       log.logtype := ltStdOut;
-    Log.Active    := True;
+    Log.Active := True;
 
-    fProxy.DefaultPort := ini.ReadInteger('Network', 'Port', 8080);
+    fProxy.DefaultPort := ini.ReadInteger('Network', 'DefaultPort', 8080);
 
     Values := TStringList.Create;
     ini.ReadSectionValues('Allow', Values);
     SetLength(IPRules, Values.Count);
     for i := 0 to Values.Count - 1 do
     begin
-      IPRules[i]     := GetNetMask(Values.ValueFromIndex[i]);
+      IPRules[i] := GetNetMask(Values.ValueFromIndex[i]);
       IPRules[i].Allow := True;
       HaveAllowRules := True;
       ;
     end;
+
     Offset := Length(IPRules);
     ini.ReadSectionValues('Deny', Values);
     SetLength(IPRules, Offset + Values.Count);
@@ -263,6 +314,24 @@ var
       IPRules[Offset + i].Allow := False;
       HaveDenyRules := True;
     end;
+
+    Values.Clear;
+    ini.ReadSectionValues('Authorization', Values);
+    HaveAuthentication:= Values.Count > 0;
+    SetLength(Users, Values.Count);
+    j:=0;
+    for i := 0 to Values.Count - 1 do
+    begin
+      if Pos(':', Values.Names[i] ) > 0 then
+        log.Error('Invalid user name "%s"',[Values.Names[i]])
+      else
+        begin
+         Users[j] := EncodeStringBase64(Values.Names[i] + ':' + Values.ValueFromIndex[i]);
+         inc(j)
+        end;
+    end;
+    SetLength(Users,j);
+    Values.Free;
     Log.info('Loaded config');
 
   end;
@@ -277,7 +346,7 @@ var
   end;
 
 begin
-  Log   := TEventLog.Create(nil);
+  Log := TEventLog.Create(nil);
   // Log.LogType := ltStdOut;
   Log.LogType := ltSystem;
   Proxy := TOvoProxy.Create;
