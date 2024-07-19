@@ -271,11 +271,13 @@ var
       FConfigFile := GetAppConfigFile(False, True);
       FConfigFile := ChangeFileExt(FConfigFile, '.conf');
     end;
+  //  log.Info('try config from '+FConfigFile);
 
     if not FileExists(FConfigFile) then
     begin
       FConfigFile := '/etc/ovoproxy.conf';
     end;
+    log.Info('Reading config from '+FConfigFile);
     Ini := TIniFile.Create(FConfigFile, [ifoStripComments, ifoStripInvalid]);
     Log.active := False;
     str := lowercase(Ini.ReadString('Config', 'LogType', 'syslog'));
@@ -292,7 +294,7 @@ var
       log.logtype := ltStdOut;
     Log.Active := True;
 
-    fProxy.DefaultPort := ini.ReadInteger('Network', 'DefaultPort', 8080);
+    fProxy.DefaultPort := ini.ReadInteger('Network', 'DefaultPort', 8118);
 
     Values := TStringList.Create;
     ini.ReadSectionValues('Allow', Values);
