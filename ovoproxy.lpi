@@ -14,11 +14,14 @@
       <ResourceType Value="res"/>
     </General>
     <MacroValues Count="1">
-      <Macro2 Name="LCLWidgetType" Value="nogui"/>
+      <Macro1 Name="LCLWidgetType" Value="nogui"/>
     </MacroValues>
     <BuildModes>
       <Item Name="Debug" Default="True"/>
       <Item Name="Release">
+        <MacroValues Count="1">
+          <Macro1 Name="LCLWidgetType" Value="nogui"/>
+        </MacroValues>
         <CompilerOptions>
           <Version Value="11"/>
           <Target>
@@ -43,11 +46,14 @@
             </Debugging>
             <LinkSmart Value="True"/>
           </Linking>
+          <Other>
+            <CustomOptions Value="LCLWidgetType:=nogui"/>
+          </Other>
         </CompilerOptions>
       </Item>
       <SharedMatrixOptions Count="2">
-        <Item1 ID="321356725916" Type="IDEMacro" MacroName="LCLWidgetType" Value="nogui"/>
-        <Item2 ID="504166161181" Modes="Debug" Type="IDEMacro" MacroName="LCLWidgetType" Value="nogui"/>
+        <Item1 ID="321356725916" Modes="Debug,Release" Type="IDEMacro" MacroName="LCLWidgetType" Value="nogui"/>
+        <Item2 ID="022018023760"/>
       </SharedMatrixOptions>
     </BuildModes>
     <PublishOptions>
@@ -85,11 +91,7 @@
     <CodeGeneration>
       <Checks>
         <IOChecks Value="True"/>
-        <RangeChecks Value="True"/>
-        <OverflowChecks Value="True"/>
-        <StackChecks Value="True"/>
       </Checks>
-      <VerifyObjMethodCallValidity Value="True"/>
     </CodeGeneration>
     <Linking>
       <Debugging>
@@ -98,6 +100,9 @@
         <TrashVariables Value="True"/>
       </Debugging>
     </Linking>
+    <Other>
+      <CustomOptions Value="LCLWidgetType:=nogui"/>
+    </Other>
   </CompilerOptions>
   <Debugging>
     <Exceptions>
