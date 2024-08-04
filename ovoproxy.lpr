@@ -16,6 +16,8 @@ uses {$IFDEF UNIX}
   base64,
   indylaz,
   SysUtils,
+  IdURI,
+  IdGlobalProtocols,
   types,
   interfaces;
 
@@ -38,6 +40,7 @@ type
     IPRules: array of ComputedNet;
     Users: TStringDynArray;
     HaveDenyRules, HaveAllowRules, HaveAuthentication: boolean;
+    function GetBinding(AIPRange: string): TIdURI;
     procedure OnConnect(AContext: TIdContext);
     procedure OnHTTPBeforeCommand(AContext: TIdHTTPProxyServerContext);
     procedure RegisterSignalHandler;
@@ -53,7 +56,6 @@ type
 var
   Proxy: TOvoProxy;
   Log: TEventLog;
-
 
   function GetNetMask(AIPRange: string): ComputedNet;
   var
@@ -99,6 +101,17 @@ var
   end;
 
   { TOvoProxy }
+  function TOvoProxy.GetBinding(AIPRange: string): TIdURI;
+  begin
+    Result := TIdURI.Create('://' + AIPRange);
+    if Result.Port = '' then
+      Result.Port := IntToStr(FProxy.DefaultPort);
+    if not IsValidIP(Result.Host) then
+    begin
+      Log.Warning('Bad binding, default to 127.0.0.1');
+      Result.Host := '127.0.0.1';
+    end;
+  end;
 
   procedure TOvoProxy.RegisterSignalHandler;
 
@@ -259,9 +272,10 @@ var
     Values: TStringList;
     i: integer;
     offset, j: integer;
+    uri: TIdURI;
     str, FConfigFile: string;
   begin
-
+    FProxy.Active := False;
     FConfigFile := '';
     if ParamCount > 0 then
       FConfigFile := ParamStr(1);
@@ -271,13 +285,13 @@ var
       FConfigFile := GetAppConfigFile(False, True);
       FConfigFile := ChangeFileExt(FConfigFile, '.conf');
     end;
-  //  log.Info('try config from '+FConfigFile);
+    //  log.Info('try config from '+FConfigFile);
 
     if not FileExists(FConfigFile) then
     begin
       FConfigFile := '/etc/ovoproxy.conf';
     end;
-    log.Info('Reading config from '+FConfigFile);
+    log.Info('Reading config from ' + FConfigFile);
     Ini := TIniFile.Create(FConfigFile, [ifoStripComments, ifoStripInvalid]);
     Log.active := False;
     str := lowercase(Ini.ReadString('Config', 'LogType', 'syslog'));
@@ -295,6 +309,22 @@ var
     Log.Active := True;
 
     fProxy.DefaultPort := ini.ReadInteger('Network', 'DefaultPort', 8118);
+    str := ini.ReadString('Network', 'Binding', '');
+    if str <> '' then
+    begin
+      FProxy.Bindings.Clear;
+      with FProxy.Bindings.Add do
+      begin
+        Uri := GetBinding(str);
+        ip := uri.Host;
+        port := strtointdef(uri.Port, fProxy.DefaultPort);
+        uri.Free;
+      end;
+    end;
+
+    ThreadPool.MaxThreads := ini.ReadInteger('Server', 'MaxThreads', 0);
+    ThreadPool.PoolSize := ini.ReadInteger('Server', 'PoolSize', 10);
+    FProxy.MaxConnections := ini.ReadInteger('Server', 'MaxConnections', 0);
 
     Values := TStringList.Create;
     ini.ReadSectionValues('Allow', Values);
@@ -319,22 +349,23 @@ var
 
     Values.Clear;
     ini.ReadSectionValues('Authorization', Values);
-    HaveAuthentication:= Values.Count > 0;
+    HaveAuthentication := Values.Count > 0;
     SetLength(Users, Values.Count);
-    j:=0;
+    j := 0;
     for i := 0 to Values.Count - 1 do
     begin
-      if Pos(':', Values.Names[i] ) > 0 then
-        log.Error('Invalid user name "%s"',[Values.Names[i]])
+      if Pos(':', Values.Names[i]) > 0 then
+        log.Error('Invalid user name "%s"', [Values.Names[i]])
       else
-        begin
-         Users[j] := EncodeStringBase64(Values.Names[i] + ':' + Values.ValueFromIndex[i]);
-         inc(j)
-        end;
+      begin
+        Users[j] := EncodeStringBase64(Values.Names[i] + ':' + Values.ValueFromIndex[i]);
+        Inc(j);
+      end;
     end;
-    SetLength(Users,j);
+    SetLength(Users, j);
     Values.Free;
     Log.info('Loaded config');
+    FProxy.Active := True;
 
   end;
 
