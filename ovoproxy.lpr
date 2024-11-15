@@ -173,17 +173,20 @@ var
     if HaveAuthentication then
     begin
       ValidUser := False;
-      if AContext.Headers.IndexOfName('Proxy-Authorization') > 0 then
+      if AContext.Headers.IndexOfName('Proxy-Authorization') > -1 then
       begin
         Header := AContext.Headers.Values['Proxy-Authorization'];
         if Header.StartsWith('Basic') then
         begin
           Header := Header.Substring(6);
           for i := 0 to Length(Users) - 1 do
+            begin
+             log.info(Users[i]);
             if Users[i] = Header then
             begin
               ValidUser := True;
               Break;
+            end;
             end;
         end;
       end;
